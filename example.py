@@ -4,7 +4,7 @@ This script expects that the following environment vars are set:
 
 AZURE_TENANT_ID: your Azure Active Directory tenant id or domain
 AZURE_CLIENT_ID: your Azure Active Directory Application Client ID
-AZURE_CLIENT_SECRET: your Azure Active Directory Application Secret
+AZURE_CLIENT_RET: your Azure Active Directory Application Secret
 AZURE_SUBSCRIPTION_ID: your Azure Subscription Id
 """
 import os
@@ -37,6 +37,7 @@ SUBNET_NAME = 'azure-sample-subnet'
 OS_DISK_NAME = 'azure-sample-osdisk'
 STORAGE_ACCOUNT_NAME = haikunator.haikunate(delimiter='')
 
+NSG_NAME = 'azure-sample-nsg'
 IP_CONFIG_NAME = 'azure-sample-ip-config'
 NIC_NAME = 'azure-sample-nic'
 USERNAME = 'userlogin'
@@ -251,6 +252,42 @@ def run_example():
 def create_nic(network_client):
     """Create a Network Interface for a VM.
     """
+    # Create network security group
+        print('\nCreating network security group')
+        async_nsg_creation = network_client.network_security_groups.create_or_update(
+            GROUP_NAME,
+            NSG_NAME,
+            {
+                "location": LOCATION,
+                "securityRules": [
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "protocol": "TCP",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 300,
+                            "direction": "Inbound",
+                        }
+                    }
+                ]
+            }
+        )
+        nsg_info = async_nsg_creation.result()
+        
+    # Create Subnet
+    print('\nCreate Subnet')
+    async_subnet_creation = network_client.subnets.create_or_update(
+        GROUP_NAME,
+        VNET_NAME,
+        SUBNET_NAME,
+        {'address_prefix': '10.0.0.0/24'}
+    )
+    subnet_info = async_subnet_creation.result()
+    
     # Create VNet
     print('\nCreate Vnet')
     async_vnet_creation = network_client.virtual_networks.create_or_update(
@@ -261,19 +298,17 @@ def create_nic(network_client):
             'address_space': {
                 'address_prefixes': ['10.0.0.0/16']
             }
+            "subnets": [
+                    {
+                        "name": subnet_info.name,
+                        "properties": {
+                            "addressPrefix": subnet_info.address_prefix
+                        }
+                    }
+                ]
         }
     )
     async_vnet_creation.wait()
-
-    # Create Subnet
-    print('\nCreate Subnet')
-    async_subnet_creation = network_client.subnets.create_or_update(
-        GROUP_NAME,
-        VNET_NAME,
-        SUBNET_NAME,
-        {'address_prefix': '10.0.0.0/24'}
-    )
-    subnet_info = async_subnet_creation.result()
 
     # Create NIC
     print('\nCreate NIC')
@@ -287,7 +322,8 @@ def create_nic(network_client):
                 'subnet': {
                     'id': subnet_info.id
                 }
-            }]
+            }],
+            'networkSecurityGroup': {'id': nsg_info.id}
         }
     )
     return async_nic_creation.result()
